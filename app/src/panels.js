@@ -114,6 +114,22 @@ export const LAYOUTS = {
       poly([[0.665, 0.52], [1, 0.52], [1, 1], [0.66, 1]]),
     ],
   },
+  filmstrip: {
+    // A cinema contact strip: one wide hero frame across the top, then a
+    // row of three smaller frames riding below it. The panels deliberately
+    // leave dark gutters between and beneath them — the renderer paints
+    // sprocket holes into the gutter under the hero, so the gaps read as
+    // film stock rather than empty space. The flag tells cover.js this
+    // layout wants that treatment.
+    label: 'Film Strip',
+    filmstrip: true,
+    panels: [
+      rect(0, 0, 1, 0.55),
+      rect(0.015, 0.615, 0.31, 0.345),
+      rect(0.345, 0.615, 0.31, 0.345),
+      rect(0.675, 0.615, 0.31, 0.345),
+    ],
+  },
   duo: {
     label: 'Diagonal Duo',
     panels: [
@@ -128,7 +144,7 @@ export const LAYOUTS = {
 };
 
 // Layout ids in the order the picker shows them.
-export const LAYOUT_ORDER = ['classic', 'keyart', 'hero3', 'castgrid', 'mosaic', 'snapshots', 'duo', 'fullbleed'];
+export const LAYOUT_ORDER = ['classic', 'keyart', 'hero3', 'castgrid', 'filmstrip', 'mosaic', 'snapshots', 'duo', 'fullbleed'];
 
 // Returns the layout record for an id, falling back to the classic six-panel
 // arrangement when the id is unknown (for example a stale query parameter).

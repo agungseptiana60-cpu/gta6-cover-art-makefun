@@ -24,7 +24,9 @@ const subtitleInput = document.getElementById('subtitleInput');
 const zoomRange = document.getElementById('zoomRange');
 const grainToggle = document.getElementById('grainToggle');
 const vignetteToggle = document.getElementById('vignetteToggle');
-const inkToggle = document.getElementById('inkToggle');
+const paintSelect = document.getElementById('paintSelect');
+const frameToggle = document.getElementById('frameToggle');
+const calloutsToggle = document.getElementById('calloutsToggle');
 const billingToggle = document.getElementById('billingToggle');
 const trayEl = document.getElementById('tray');
 const heatLabel = document.getElementById('heatLabel');
@@ -42,13 +44,43 @@ const state = {
   heat: 4,
   grain: true,
   vignette: true,
-  ink: false,
+  paintStyle: 'off',
+  frame: true,
+  callouts: true,
   billing: true,
   slots: [],
   selectedPanel: 0,
   selectedPhoto: 0,
   photos: [],
 };
+
+// Poster formulas: one-click recipes that set the layout, grade, paint
+// style, heat and words together. They exist for the shortest path from
+// photo to finished poster — a visitor who likes a formula's look is one
+// click and one export away from a PNG, and can still tweak every part
+// of it afterwards.
+const FORMULAS = [
+  {
+    id: 'neon-getaway', label: 'Neon Getaway',
+    layoutId: 'keyart', gradeId: 'neon', paintStyle: 'off', heat: 5,
+    caption: 'NEON GETAWAY', subtitle: 'one night, one wheel, no brakes',
+  },
+  {
+    id: 'golden-crew', label: 'Golden Crew',
+    layoutId: 'castgrid', gradeId: 'golden', paintStyle: 'off', heat: 4,
+    caption: 'GOLDEN CREW', subtitle: 'family business, sunset hours',
+  },
+  {
+    id: 'ink-confidential', label: 'Ink Confidential',
+    layoutId: 'filmstrip', gradeId: 'ink', paintStyle: 'ink', heat: 4,
+    caption: 'INK CONFIDENTIAL', subtitle: 'printed after dark',
+  },
+  {
+    id: 'acid-sunset', label: 'Acid Sunset',
+    layoutId: 'classic', gradeId: 'acid', paintStyle: 'kuwahara', heat: 5,
+    caption: 'ACID SUNSET', subtitle: 'the sky went loud',
+  },
+];
 
 const undoStack = [];
 
@@ -139,7 +171,9 @@ function redraw() {
     heat: state.heat,
     grain: state.grain,
     vignette: state.vignette,
-    ink: state.ink,
+    paint: state.paintStyle,
+    frame: state.frame,
+    callouts: state.callouts,
     billing: state.billing,
     selectedIndex: document.body.classList.contains('shot-cover') ? -1 : state.selectedPanel,
   });
@@ -226,7 +260,9 @@ function exportPng(sizeKey) {
     heat: state.heat,
     grain: state.grain,
     vignette: state.vignette,
-    ink: state.ink,
+    paint: state.paintStyle,
+    frame: state.frame,
+    callouts: state.callouts,
     billing: state.billing,
     selectedIndex: -1,
   });
@@ -241,9 +277,37 @@ function exportPng(sizeKey) {
   }, 'image/png');
 }
 
+// Applies one poster formula: layout, grade, paint style, heat and both
+// lines of wording in a single move, keeping the current photo
+// arrangement so the recipe lands on the visitor's own pictures.
+function applyFormula(formula) {
+  pushUndo();
+  state.layoutId = formula.layoutId;
+  state.gradeId = formula.gradeId;
+  state.paintStyle = formula.paintStyle;
+  state.heat = formula.heat;
+  state.caption = formula.caption;
+  state.subtitle = formula.subtitle;
+  captionInput.value = formula.caption;
+  subtitleInput.value = formula.subtitle;
+  paintSelect.value = formula.paintStyle;
+  rebuildSlots(true);
+  redraw();
+  say(`Formula applied: ${formula.label}. Tweak anything you like, then export.`);
+}
+
 // Builds the picker buttons from the layout and grade tables so the HTML
 // stays lean and the labels can never drift from the renderer's data.
 function buildPickers() {
+  const formulaBox = document.getElementById('formulaRow');
+  for (const formula of FORMULAS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'formula-card';
+    b.textContent = formula.label;
+    b.addEventListener('click', () => applyFormula(formula));
+    formulaBox.appendChild(b);
+  }
   const layoutBox = document.getElementById('layoutPicker');
   for (const id of LAYOUT_ORDER) {
     const b = document.createElement('button');
@@ -364,7 +428,9 @@ function wireControls() {
   });
   grainToggle.addEventListener('change', () => { state.grain = grainToggle.checked; redraw(); });
   vignetteToggle.addEventListener('change', () => { state.vignette = vignetteToggle.checked; redraw(); });
-  inkToggle.addEventListener('change', () => { state.ink = inkToggle.checked; redraw(); });
+  paintSelect.addEventListener('change', () => { state.paintStyle = paintSelect.value; redraw(); });
+  frameToggle.addEventListener('change', () => { state.frame = frameToggle.checked; redraw(); });
+  calloutsToggle.addEventListener('change', () => { state.callouts = calloutsToggle.checked; redraw(); });
   billingToggle.addEventListener('change', () => { state.billing = billingToggle.checked; redraw(); });
   document.getElementById('fillAllBtn').addEventListener('click', () => {
     pushUndo();
@@ -430,14 +496,29 @@ function applyShot(shot) {
   state.caption = shot.caption;
   state.subtitle = shot.subtitle;
   state.heat = shot.heat;
-  state.ink = shot.ink === true;
+  state.paintStyle = shot.paint ?? 'off';
+  state.frame = shot.frame !== false;
+  state.callouts = shot.callouts !== false;
   state.billing = shot.billing !== false;
-  inkToggle.checked = state.ink;
+  paintSelect.value = state.paintStyle;
+  frameToggle.checked = state.frame;
+  calloutsToggle.checked = state.callouts;
   billingToggle.checked = state.billing;
   const key = `${shot.width}x${shot.height}`;
   if (POST_SIZES[key]) state.sizeKey = key;
   captionInput.value = shot.caption;
   subtitleInput.value = shot.subtitle;
+  if (shot.mode === 'editor') {
+    // Editor screenshots start with the formulas row at the top of the
+    // control rail, so the one-click recipes, the layout furniture
+    // toggles and the paint style all sit inside the frame.
+    const controls = document.querySelector('.panel-controls');
+    const formulas = document.getElementById('formulaGroup');
+    if (controls && formulas) {
+      const delta = formulas.getBoundingClientRect().top - controls.getBoundingClientRect().top;
+      controls.scrollTop = Math.max(0, controls.scrollTop + delta - 6);
+    }
+  }
 }
 
 // Boots the page: fonts first, then samples, then either a shot scene or
@@ -450,7 +531,9 @@ async function boot() {
   subtitleInput.value = state.subtitle;
   grainToggle.checked = state.grain;
   vignetteToggle.checked = state.vignette;
-  inkToggle.checked = state.ink;
+  paintSelect.value = state.paintStyle;
+  frameToggle.checked = state.frame;
+  calloutsToggle.checked = state.callouts;
   billingToggle.checked = state.billing;
   const shot = readShotRequest(location.search);
   try {

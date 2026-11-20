@@ -3,10 +3,13 @@
 //   ?shot=cover  renders only the finished poster, full-frame
 //   ?shot=editor shows the normal editor with a composed cover in it
 // Both modes accept layout, grade, caption, subtitle, heat and size
-// parameters so each screenshot can show a different poster, plus ink=1
-// for the Poster Ink pass and billing=0 to hide the credits block. This module
-// only parses and describes those scenes; main.js does the loading and
-// painting, then flags window.__shotReady once a frame is on screen.
+// parameters so each screenshot can show a different poster, plus paint=
+// (off, ink or kuwahara) for the paint style, frame=0 / callouts=0 to
+// hide the gold frame or the panel callouts, and billing=0 to hide the
+// credits block. The older ink=1 spelling still works and means
+// paint=ink. This module only parses and describes those scenes; main.js
+// does the loading and painting, then flags window.__shotReady once a
+// frame is on screen.
 
 // The built-in photographs, in the order panels are filled by default. The
 // cycle repeats when a layout has more panels than there are samples, and
@@ -42,6 +45,10 @@ export function readShotRequest(search) {
   const sizeKey = params.get('size') ?? '1080x1080';
   const size = SHOT_SIZES[sizeKey] ?? SHOT_SIZES['1080x1080'];
   const heatRaw = Number.parseInt(params.get('heat') ?? '4', 10);
+  const paintRaw = params.get('paint');
+  const paint = ['off', 'ink', 'kuwahara'].includes(paintRaw)
+    ? paintRaw
+    : (params.get('ink') === '1' ? 'ink' : null);
   return {
     mode,
     layoutId: params.get('layout') ?? 'classic',
@@ -49,7 +56,9 @@ export function readShotRequest(search) {
     caption: params.get('caption') ?? 'NEON HARBOR',
     subtitle: params.get('subtitle') ?? '',
     heat: Number.isNaN(heatRaw) ? 4 : Math.max(0, Math.min(5, heatRaw)),
-    ink: params.get('ink') === '1',
+    paint,
+    frame: params.get('frame') !== '0',
+    callouts: params.get('callouts') !== '0',
     billing: params.get('billing') !== '0',
     width: size.w,
     height: size.h,

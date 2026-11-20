@@ -27,15 +27,29 @@
       </div>
     </section>
 
+    <section class="group" id="formulaGroup">
+      <h2>★ Poster formulas</h2>
+      <div id="formulaRow" class="formula-row"></div>
+      <p class="hint">One click sets the layout, grade, paint style, heat and words — the fastest route from photo to poster.</p>
+    </section>
+
     <section class="group">
       <h2>2 · Layout</h2>
       <div id="layoutPicker" class="picker"></div>
+      <label class="check"><input id="frameToggle" type="checkbox" checked> Gold frame (double rule with corner studs)</label>
+      <label class="check"><input id="calloutsToggle" type="checkbox" checked> Callouts (scene captions pinned to panels)</label>
     </section>
 
     <section class="group">
       <h2>3 · Colour grade</h2>
       <div id="gradePicker" class="picker"></div>
-      <label class="check"><input id="inkToggle" type="checkbox"> Poster ink (flatten photos into print colours, over any grade)</label>
+      <label class="field">Paint style
+        <select id="paintSelect">
+          <option value="off">Off — clean graded photos</option>
+          <option value="ink">Poster Ink — flat print colours</option>
+          <option value="kuwahara">Kuwahara — painterly brush fields</option>
+        </select>
+      </label>
       <label class="check"><input id="grainToggle" type="checkbox" checked> Film grain</label>
       <label class="check"><input id="vignetteToggle" type="checkbox" checked> Vignette</label>
     </section>

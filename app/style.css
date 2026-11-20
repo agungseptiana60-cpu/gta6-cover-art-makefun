@@ -70,6 +70,16 @@ button.primary {
   background: rgba(0, 0, 0, 0.35); color: #ffffff;
 }
 .field input[type='range'] { width: 100%; accent-color: #ff2e88; }
+.field select {
+  font: inherit; padding: 8px 9px; border-radius: 7px; border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(0, 0, 0, 0.35); color: #ffffff;
+}
+.formula-row { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.formula-card {
+  text-align: left; font-size: 12.5px; border-left: 5px solid #caa437;
+  background: linear-gradient(120deg, rgba(202, 164, 55, 0.16), rgba(255, 255, 255, 0.06));
+}
+.formula-card:hover { background: linear-gradient(120deg, rgba(202, 164, 55, 0.3), rgba(255, 255, 255, 0.12)); }
 .check { display: flex; align-items: center; gap: 7px; font-size: 13px; }
 .check input { accent-color: #ff2e88; }
 .hint { margin: 0; color: #bda8dd; font-size: 12.5px; }

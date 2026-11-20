@@ -83,14 +83,37 @@ export const GRADES = {
     ],
     accent: '#ffb347',
     ink: true,
+    paint: 'ink',
     inkLevels: 4,
     inkSaturation: 1.35,
     inkContrast: 1.12,
   },
+  kuwahara: {
+    // Kuwahara Paint runs every panel photograph through a real
+    // Kuwahara filter (kuwaharaPixels, below): each pixel takes the
+    // average colour of whichever quadrant around it is smoothest, so
+    // flat areas melt into brush fields while edges stay where the
+    // photograph put them. A light posterize afterwards flattens the
+    // fields a touch further and lifts the saturation, the way a
+    // painted poster keeps its colours louder than life.
+    label: 'Kuwahara Paint',
+    filter: 'saturate(1.12) contrast(1.04) brightness(1.01)',
+    wash: [
+      [0, 'rgba(64, 16, 96, 0.24)'],
+      [0.5, 'rgba(255, 94, 98, 0.08)'],
+      [1, 'rgba(120, 20, 90, 0.30)'],
+    ],
+    accent: '#ffd166',
+    paint: 'kuwahara',
+    kuwaRadius: 4,
+    kuwaLevels: 6,
+    kuwaSaturation: 1.18,
+    kuwaContrast: 1.04,
+  },
 };
 
 // Grade ids in the order the swatch row shows them.
-export const GRADE_ORDER = ['sunset', 'neon', 'golden', 'midnight', 'heatwave', 'acid', 'ink'];
+export const GRADE_ORDER = ['sunset', 'neon', 'golden', 'midnight', 'heatwave', 'acid', 'ink', 'kuwahara'];
 
 // Returns the grade record for an id, defaulting to Sunset Vice.
 export function gradeById(id) {
@@ -152,6 +175,95 @@ export function posterizePixels(imageData, levels = 5, saturation = 1.3, contras
     data[i] = Math.round(Math.min(1, Math.max(0, Math.round(r * steps) / steps)) * 255);
     data[i + 1] = Math.round(Math.min(1, Math.max(0, Math.round(g * steps) / steps)) * 255);
     data[i + 2] = Math.round(Math.min(1, Math.max(0, Math.round(b * steps) / steps)) * 255);
+  }
+  return imageData;
+}
+
+// The Kuwahara paint pass. The classic painterly filter: around every
+// pixel sit four overlapping quadrants; the pixel takes the mean colour
+// of the quadrant whose luminance varies least. Smooth regions (skies,
+// walls, skin) therefore collapse into flat fields of averaged colour —
+// the look of paint laid down in blocks — while a quadrant straddling a
+// real edge has high variance and loses, so edges survive sharp.
+// Quadrant statistics come from integral images (summed-area tables of
+// the channel values and of luminance and its square), which makes each
+// quadrant's mean and variance an O(1) lookup: the whole pass stays a
+// single linear sweep however large the radius.
+export function kuwaharaPixels(imageData, radius = 4) {
+  const w = imageData.width;
+  const h = imageData.height;
+  const data = imageData.data;
+  if (w < 3 || h < 3 || radius < 1) return imageData;
+  const stride = w + 1;
+  const size = stride * (h + 1);
+  const sumR = new Float64Array(size);
+  const sumG = new Float64Array(size);
+  const sumB = new Float64Array(size);
+  const sumL = new Float64Array(size);
+  const sumL2 = new Float64Array(size);
+  for (let y = 0; y < h; y++) {
+    let rowR = 0;
+    let rowG = 0;
+    let rowB = 0;
+    let rowL = 0;
+    let rowL2 = 0;
+    const srcRow = y * w * 4;
+    const dstRow = (y + 1) * stride;
+    const upRow = y * stride;
+    for (let x = 0; x < w; x++) {
+      const i = srcRow + x * 4;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+      rowR += r;
+      rowG += g;
+      rowB += b;
+      rowL += luma;
+      rowL2 += luma * luma;
+      const j = dstRow + x + 1;
+      sumR[j] = sumR[upRow + x + 1] + rowR;
+      sumG[j] = sumG[upRow + x + 1] + rowG;
+      sumB[j] = sumB[upRow + x + 1] + rowB;
+      sumL[j] = sumL[upRow + x + 1] + rowL;
+      sumL2[j] = sumL2[upRow + x + 1] + rowL2;
+    }
+  }
+  // Sum of a table over the inclusive pixel rectangle (x1..x2, y1..y2).
+  const rectSum = (table, x1, y1, x2, y2) =>
+    table[(y2 + 1) * stride + x2 + 1] - table[y1 * stride + x2 + 1] -
+    table[(y2 + 1) * stride + x1] + table[y1 * stride + x1];
+  const r = Math.round(radius);
+  for (let y = 0; y < h; y++) {
+    const yTop = Math.max(0, y - r);
+    const yBot = Math.min(h - 1, y + r);
+    for (let x = 0; x < w; x++) {
+      const xLeft = Math.max(0, x - r);
+      const xRight = Math.min(w - 1, x + r);
+      // The four quadrants: [x1, y1, x2, y2] each anchored on the pixel.
+      const quads = [
+        [xLeft, yTop, x, y],
+        [x, yTop, xRight, y],
+        [xLeft, y, x, yBot],
+        [x, y, xRight, yBot],
+      ];
+      let best = null;
+      let bestVar = Infinity;
+      for (const [qx1, qy1, qx2, qy2] of quads) {
+        const count = (qx2 - qx1 + 1) * (qy2 - qy1 + 1);
+        const meanL = rectSum(sumL, qx1, qy1, qx2, qy2) / count;
+        const variance = rectSum(sumL2, qx1, qy1, qx2, qy2) / count - meanL * meanL;
+        if (variance < bestVar) {
+          bestVar = variance;
+          best = [qx1, qy1, qx2, qy2, count];
+        }
+      }
+      const [bx1, by1, bx2, by2, bCount] = best;
+      const i = (y * w + x) * 4;
+      data[i] = rectSum(sumR, bx1, by1, bx2, by2) / bCount;
+      data[i + 1] = rectSum(sumG, bx1, by1, bx2, by2) / bCount;
+      data[i + 2] = rectSum(sumB, bx1, by1, bx2, by2) / bCount;
+    }
   }
   return imageData;
 }

@@ -5,7 +5,7 @@
 // the VICE PANELS badge ribbon. The editor preview and the PNG export both
 // call it, so what the user sees is exactly what they download.
 import { layoutById, polygonBounds, shrinkPolygon } from './panels.js';
-import { gradeById, paintGradeWash, paintFilmGrain, paintVignette, posterizePixels } from './grades.js';
+import { gradeById, paintGradeWash, paintFilmGrain, paintVignette, posterizePixels, kuwaharaPixels } from './grades.js';
 
 // Traces a polygon as the current path, scaled from normalised coordinates
 // into the pixel space of a w by h cover.
@@ -46,28 +46,38 @@ function drawPanelPhoto(ctx, image, points, w, h, view) {
   ctx.drawImage(image, bx + (bw - dw) / 2 + ox, by + (bh - dh) / 2 + oy, dw, dh);
 }
 
-// The Poster Ink version of a panel photograph. The photo is cover-fitted
+// The painted version of a panel photograph. The photo is cover-fitted
 // onto a small offscreen canvas the size of the panel's bounding box
-// (capped, so a full-bleed panel never posterizes more than a poster's
-// worth of pixels), run through the posterize pass, and handed back ready
-// to be drawn into the clipped panel. The result is cached on the slot:
-// a redraw that changes nothing about this panel reuses the same canvas
-// instead of flattening the same pixels again.
-function inkedPanelCanvas(slot, points, w, h, grade, levels) {
+// (capped, so a full-bleed panel never paints more than a poster's worth
+// of pixels), run through the pixel pass the mode names, and handed back
+// ready to be drawn into the clipped panel. Two modes:
+//   'ink'      — Poster Ink: colours snapped to a few flat print levels.
+//   'kuwahara' — Kuwahara Paint: each pixel takes the smoothest
+//                quadrant's mean, melting the photo into brush fields,
+//                then a light posterize lifts and flattens them.
+// The Kuwahara cap is lower (512 against ink's 640) because its filter
+// window is wider; both stay small enough to re-run interactively. The
+// result is cached on the slot: a redraw that changes nothing about this
+// panel reuses the same canvas instead of painting the same pixels again.
+function paintedPanelCanvas(slot, points, w, h, grade, mode) {
   const image = slot.image;
   const box = polygonBounds(points);
   const bw = Math.max(2, Math.round(box.w * w));
   const bh = Math.max(2, Math.round(box.h * h));
-  const shrink = Math.min(1, 640 / Math.max(bw, bh));
+  const cap = mode === 'kuwahara' ? 512 : 640;
+  const shrink = Math.min(1, cap / Math.max(bw, bh));
   const ow = Math.max(2, Math.round(bw * shrink));
   const oh = Math.max(2, Math.round(bh * shrink));
   const zoom = slot.zoom ?? 1;
+  const flavour = mode === 'kuwahara'
+    ? `k${grade.kuwaRadius ?? 4}/${grade.kuwaLevels ?? 6}`
+    : `i${grade.inkLevels ?? 5}`;
   const key = [
-    grade.filter, levels, ow, oh, zoom,
+    mode, grade.filter, flavour, ow, oh, zoom,
     (slot.ox ?? 0).toFixed(3), (slot.oy ?? 0).toFixed(3),
   ].join('|');
-  if (slot._ink && slot._ink.key === key && slot._ink.image === image) {
-    return slot._ink.canvas;
+  if (slot._paint && slot._paint.key === key && slot._paint.image === image) {
+    return slot._paint.canvas;
   }
   const off = document.createElement('canvas');
   off.width = ow;
@@ -84,19 +94,24 @@ function inkedPanelCanvas(slot, points, w, h, grade, levels) {
   octx.drawImage(image, (ow - dw) / 2 + ox, (oh - dh) / 2 + oy, dw, dh);
   octx.filter = 'none';
   const pixels = octx.getImageData(0, 0, ow, oh);
-  posterizePixels(pixels, levels, grade.inkSaturation ?? 1.3, grade.inkContrast ?? 1.1);
+  if (mode === 'kuwahara') {
+    kuwaharaPixels(pixels, grade.kuwaRadius ?? 4);
+    posterizePixels(pixels, grade.kuwaLevels ?? 6, grade.kuwaSaturation ?? 1.18, grade.kuwaContrast ?? 1.04);
+  } else {
+    posterizePixels(pixels, grade.inkLevels ?? 5, grade.inkSaturation ?? 1.3, grade.inkContrast ?? 1.1);
+  }
   octx.putImageData(pixels, 0, 0);
-  slot._ink = { key, image, canvas: off };
+  slot._paint = { key, image, canvas: off };
   return off;
 }
 
 // Paints one panel's photograph into an already-clipped context: the plain
-// graded draw most of the time, or the flattened Poster Ink version when
-// the ink pass is on (the Poster Ink grade itself, or the editor's Ink
-// toggle laid over any other grade).
-function paintPanelPhoto(ctx, slot, points, w, h, grade, inkOn, inkLevels) {
+// graded draw most of the time, or a painted version when a paint mode is
+// active — the grade's own (the Poster Ink and Kuwahara Paint grades) or
+// the editor's paint style laid over any other grade.
+function paintPanelPhoto(ctx, slot, points, w, h, grade, paintMode) {
   const image = slot?.image ?? null;
-  if (!image || !inkOn) {
+  if (!image || !paintMode) {
     ctx.save();
     ctx.filter = grade.filter;
     drawPanelPhoto(ctx, image, points, w, h, slot);
@@ -104,8 +119,8 @@ function paintPanelPhoto(ctx, slot, points, w, h, grade, inkOn, inkLevels) {
     return;
   }
   const box = polygonBounds(points);
-  const inked = inkedPanelCanvas(slot, points, w, h, grade, inkLevels);
-  ctx.drawImage(inked, box.x * w, box.y * h, box.w * w, box.h * h);
+  const painted = paintedPanelCanvas(slot, points, w, h, grade, paintMode);
+  ctx.drawImage(painted, box.x * w, box.y * h, box.w * w, box.h * h);
 }
 
 // Strokes one panel's outline: a thick black ink line first, then a hairline
@@ -245,6 +260,120 @@ function fitFontSize(ctx, text, family, startSize, maxWidth) {
   return size;
 }
 
+// The gold frame: a thin double rule inset from the cover's edge, with a
+// small diamond flourish sitting on each corner. Gallery framing is the
+// oldest trick in poster printing — it tells the eye the collage inside
+// is a finished piece, not a draft — and the double line (one bright, one
+// deep gold) keeps it reading as metal rather than a yellow border.
+function paintGoldFrame(ctx, w, h) {
+  const unit = Math.min(w, h);
+  const inset = unit * 0.02;
+  const grad = ctx.createLinearGradient(0, 0, w, h);
+  grad.addColorStop(0, '#f7e08b');
+  grad.addColorStop(0.5, '#caa437');
+  grad.addColorStop(1, '#f1d47a');
+  ctx.save();
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = Math.max(2, unit * 0.0045);
+  ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2);
+  const inset2 = inset + unit * 0.011;
+  ctx.strokeStyle = 'rgba(245, 217, 126, 0.8)';
+  ctx.lineWidth = Math.max(1, unit * 0.0018);
+  ctx.strokeRect(inset2, inset2, w - inset2 * 2, h - inset2 * 2);
+  // Corner diamonds: a small rotated square centred on each corner of
+  // the outer rule, like the studs on a framed print.
+  const gem = unit * 0.009;
+  ctx.fillStyle = grad;
+  ctx.strokeStyle = '#0a0512';
+  ctx.lineWidth = Math.max(1, unit * 0.002);
+  const corners = [
+    [inset, inset],
+    [w - inset, inset],
+    [inset, h - inset],
+    [w - inset, h - inset],
+  ];
+  for (const [cx, cy] of corners) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(Math.PI / 4);
+    ctx.beginPath();
+    ctx.rect(-gem / 2, -gem / 2, gem, gem);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+  ctx.restore();
+}
+
+// Panel callouts: small caption chips pinned near the foot of the first
+// few panels, each naming its scene the way a poster names its set
+// pieces. The wording is invented furniture — story beats, not brands —
+// set in condensed capitals on a dark chip with a gold edge, tilted a
+// degree or two so they feel stuck on rather than typeset.
+const CALLOUT_LABELS = ['THE GETAWAY', 'THE PIER AT DUSK', 'THE CREW', 'MIDNIGHT RUN', 'THE DROP', 'PALM ROW'];
+const CALLOUT_TILTS = [-0.05, 0.04, -0.03];
+
+function paintCallouts(ctx, w, h, layout) {
+  const unit = Math.min(w, h);
+  const family = `'Arial Narrow', 'Liberation Sans Narrow', Arial, sans-serif`;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  layout.panels.slice(0, 3).forEach((points, i) => {
+    const box = polygonBounds(points);
+    const label = CALLOUT_LABELS[i % CALLOUT_LABELS.length];
+    const size = unit * 0.02;
+    ctx.font = `700 ${size}px ${family}`;
+    try { ctx.letterSpacing = '0.08em'; } catch { /* garnish only */ }
+    const chipW = ctx.measureText(label).width + size * 1.2;
+    const chipH = size * 1.8;
+    // Anchored a third of the way across the panel's foot, lifted clear
+    // of the heat meter and billing band along the cover's bottom edge.
+    let cx = (box.x + box.w * 0.3) * w;
+    const bottom = Math.min((box.y + box.h) * h - unit * 0.014, h * 0.885);
+    const cy = bottom - chipH / 2;
+    cx = Math.max(chipW / 2 + unit * 0.012, Math.min(w - chipW / 2 - unit * 0.012, cx));
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(CALLOUT_TILTS[i % CALLOUT_TILTS.length]);
+    ctx.shadowColor = 'rgba(0,0,0,0.55)';
+    ctx.shadowBlur = unit * 0.008;
+    ctx.beginPath();
+    ctx.roundRect(-chipW / 2, -chipH / 2, chipW, chipH, chipH * 0.28);
+    ctx.fillStyle = 'rgba(10, 5, 18, 0.85)';
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = 'rgba(245, 217, 126, 0.9)';
+    ctx.lineWidth = Math.max(1, unit * 0.002);
+    ctx.stroke();
+    ctx.fillStyle = '#ffeec4';
+    ctx.fillText(label, 0, size * 0.04);
+    ctx.restore();
+  });
+  ctx.restore();
+}
+
+// The film strip's sprocket holes: a row of pale rounded slots punched
+// through the dark gutter between the hero frame and the strip below it.
+// One row is all the geometry leaves room for, and one row is enough —
+// the eye completes the film stock from a single perforated edge.
+function paintFilmstripHoles(ctx, w, h) {
+  const unit = Math.min(w, h);
+  const holeW = unit * 0.017;
+  const holeH = unit * 0.011;
+  const cy = 0.5825 * h;
+  const count = Math.max(8, Math.floor(w / (holeW * 2.2)));
+  ctx.save();
+  ctx.fillStyle = 'rgba(238, 228, 205, 0.42)';
+  for (let i = 0; i < count; i++) {
+    const x = ((i + 0.5) * w) / count - holeW / 2;
+    ctx.beginPath();
+    ctx.roundRect(x, cy - holeH / 2, holeW, holeH, holeH * 0.35);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 // The lettering block at the top centre of the cover: the caption in Anton
 // capitals filled with a sunset gradient and ringed in black, and beneath
 // it the subtitle in glowing neon-pink script. Both are auto-fitted so a
@@ -321,23 +450,36 @@ function paintLettering(ctx, w, h, caption, subtitle) {
 
 // Paints the whole cover described by `state`:
 //   { width, height, layoutId, gradeId, slots, caption, subtitle, heat,
-//     grain, vignette, ink, billing, selectedIndex }
+//     grain, vignette, paint, frame, callouts, billing, selectedIndex }
 // where slots is an array parallel to the layout's panels, each entry
-// either null or { image, zoom, ox, oy }. `ink` asks for the Poster Ink
-// pixel pass over whatever grade is chosen; `billing` (default on) adds
-// the movie-poster credits block along the bottom edge.
+// either null or { image, zoom, ox, oy }. `paint` is the editor's paint
+// style — 'ink' or 'kuwahara' laid over whatever grade is chosen, 'off'
+// for none; a grade with its own paint (Poster Ink, Kuwahara Paint)
+// paints even when the style is off. `frame` and `callouts` default on,
+// as does `billing`, the movie-poster credits block along the bottom.
 export function renderCover(ctx, state) {
   const w = state.width;
   const h = state.height;
   const layout = layoutById(state.layoutId);
   const grade = gradeById(state.gradeId);
   const isSnapshots = state.layoutId === 'snapshots';
-  const inkOn = state.ink === true || grade.ink === true;
-  const inkLevels = grade.inkLevels ?? 5;
+  let paintMode = grade.paint ?? null;
+  if (state.paint != null) {
+    if (state.paint === 'ink' || state.paint === 'kuwahara') paintMode = state.paint;
+  } else if (state.ink === true && !paintMode) {
+    paintMode = 'ink';
+  }
 
   ctx.save();
   ctx.fillStyle = '#0d0618';
   ctx.fillRect(0, 0, w, h);
+  if (layout.filmstrip) {
+    // The strip half of the cover sits on near-black film stock, darker
+    // than the plum backdrop, so the frames and gutters read as one
+    // length of film rather than four separate pictures.
+    ctx.fillStyle = '#07030d';
+    ctx.fillRect(0, h * 0.55, w, h * 0.45);
+  }
 
   layout.panels.forEach((points, index) => {
     const slot = state.slots[index] ?? null;
@@ -351,16 +493,17 @@ export function renderCover(ctx, state) {
       const inset = shrinkPolygon(points, 0.9);
       tracePolygon(ctx, inset, w, h);
       ctx.clip();
-      paintPanelPhoto(ctx, slot, inset, w, h, grade, inkOn, inkLevels);
+      paintPanelPhoto(ctx, slot, inset, w, h, grade, paintMode);
     } else {
       tracePolygon(ctx, points, w, h);
       ctx.clip();
-      paintPanelPhoto(ctx, slot, points, w, h, grade, inkOn, inkLevels);
+      paintPanelPhoto(ctx, slot, points, w, h, grade, paintMode);
     }
     ctx.restore();
   });
 
   paintGradeWash(ctx, grade, w, h);
+  if (layout.filmstrip) paintFilmstripHoles(ctx, w, h);
 
   layout.panels.forEach((points, index) => {
     if (isSnapshots && index === 0) return;
@@ -379,6 +522,9 @@ export function renderCover(ctx, state) {
       ctx.restore();
     }
   }
+
+  if (state.frame !== false) paintGoldFrame(ctx, w, h);
+  if (state.callouts !== false) paintCallouts(ctx, w, h, layout);
 
   if (state.grain) paintFilmGrain(ctx, w, h);
   if (state.vignette) paintVignette(ctx, w, h);
