@@ -5,7 +5,7 @@
 // the VICE PANELS badge ribbon. The editor preview and the PNG export both
 // call it, so what the user sees is exactly what they download.
 import { layoutById, polygonBounds, shrinkPolygon } from './panels.js';
-import { gradeById, paintGradeWash, paintFilmGrain, paintVignette } from './grades.js';
+import { gradeById, paintGradeWash, paintFilmGrain, paintVignette, posterizePixels } from './grades.js';
 
 // Traces a polygon as the current path, scaled from normalised coordinates
 // into the pixel space of a w by h cover.
@@ -44,6 +44,68 @@ function drawPanelPhoto(ctx, image, points, w, h, view) {
   const ox = (view?.ox ?? 0) * bw;
   const oy = (view?.oy ?? 0) * bh;
   ctx.drawImage(image, bx + (bw - dw) / 2 + ox, by + (bh - dh) / 2 + oy, dw, dh);
+}
+
+// The Poster Ink version of a panel photograph. The photo is cover-fitted
+// onto a small offscreen canvas the size of the panel's bounding box
+// (capped, so a full-bleed panel never posterizes more than a poster's
+// worth of pixels), run through the posterize pass, and handed back ready
+// to be drawn into the clipped panel. The result is cached on the slot:
+// a redraw that changes nothing about this panel reuses the same canvas
+// instead of flattening the same pixels again.
+function inkedPanelCanvas(slot, points, w, h, grade, levels) {
+  const image = slot.image;
+  const box = polygonBounds(points);
+  const bw = Math.max(2, Math.round(box.w * w));
+  const bh = Math.max(2, Math.round(box.h * h));
+  const shrink = Math.min(1, 640 / Math.max(bw, bh));
+  const ow = Math.max(2, Math.round(bw * shrink));
+  const oh = Math.max(2, Math.round(bh * shrink));
+  const zoom = slot.zoom ?? 1;
+  const key = [
+    grade.filter, levels, ow, oh, zoom,
+    (slot.ox ?? 0).toFixed(3), (slot.oy ?? 0).toFixed(3),
+  ].join('|');
+  if (slot._ink && slot._ink.key === key && slot._ink.image === image) {
+    return slot._ink.canvas;
+  }
+  const off = document.createElement('canvas');
+  off.width = ow;
+  off.height = oh;
+  const octx = off.getContext('2d', { willReadFrequently: true });
+  octx.fillStyle = '#2a1140';
+  octx.fillRect(0, 0, ow, oh);
+  octx.filter = grade.filter;
+  const scale = Math.max(ow / image.naturalWidth, oh / image.naturalHeight) * zoom;
+  const dw = image.naturalWidth * scale;
+  const dh = image.naturalHeight * scale;
+  const ox = (slot.ox ?? 0) * ow;
+  const oy = (slot.oy ?? 0) * oh;
+  octx.drawImage(image, (ow - dw) / 2 + ox, (oh - dh) / 2 + oy, dw, dh);
+  octx.filter = 'none';
+  const pixels = octx.getImageData(0, 0, ow, oh);
+  posterizePixels(pixels, levels, grade.inkSaturation ?? 1.3, grade.inkContrast ?? 1.1);
+  octx.putImageData(pixels, 0, 0);
+  slot._ink = { key, image, canvas: off };
+  return off;
+}
+
+// Paints one panel's photograph into an already-clipped context: the plain
+// graded draw most of the time, or the flattened Poster Ink version when
+// the ink pass is on (the Poster Ink grade itself, or the editor's Ink
+// toggle laid over any other grade).
+function paintPanelPhoto(ctx, slot, points, w, h, grade, inkOn, inkLevels) {
+  const image = slot?.image ?? null;
+  if (!image || !inkOn) {
+    ctx.save();
+    ctx.filter = grade.filter;
+    drawPanelPhoto(ctx, image, points, w, h, slot);
+    ctx.restore();
+    return;
+  }
+  const box = polygonBounds(points);
+  const inked = inkedPanelCanvas(slot, points, w, h, grade, inkLevels);
+  ctx.drawImage(inked, box.x * w, box.y * h, box.w * w, box.h * h);
 }
 
 // Strokes one panel's outline: a thick black ink line first, then a hairline
@@ -140,6 +202,36 @@ function paintBadgeRibbon(ctx, w, h, accent) {
   void accent;
 }
 
+// The billing block: the dense little credits paragraph every real movie
+// poster carries along its bottom edge. All the names are invented for
+// this app — a fictional studio, fictional cast, fictional crew — set in
+// tiny condensed capitals, centred, in two lines tucked under the heat
+// meter. It is pure furniture, but it is the furniture that makes a
+// collage read as a cinema poster at thumbnail size.
+const BILLING_LINES = [
+  'VICE PANELS PICTURES PRESENTS · A SOUTH SHORE PRODUCTION',
+  'STARRING J. MARLOWE · T. VANCE · L. SOLANO — MUSIC BY THE PALM CLUB — EDITED BY R. CUTTER — DIRECTED BY A. REYES',
+];
+
+function paintBillingBlock(ctx, w, h) {
+  const unit = Math.min(w, h);
+  const family = `'Arial Narrow', 'Liberation Sans Narrow', Arial, sans-serif`;
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'alphabetic';
+  try { ctx.letterSpacing = '0.14em'; } catch { /* older engines: spacing is a garnish */ }
+  ctx.shadowColor = 'rgba(0,0,0,0.7)';
+  ctx.shadowBlur = unit * 0.004;
+  ctx.fillStyle = 'rgba(255, 244, 230, 0.88)';
+  const baselines = [h - unit * 0.0245, h - unit * 0.0085];
+  BILLING_LINES.forEach((line, i) => {
+    const size = fitFontSize(ctx, line, family, unit * (i === 0 ? 0.0125 : 0.011), w * 0.66);
+    ctx.font = `600 ${size}px ${family}`;
+    ctx.fillText(line, w / 2, baselines[i]);
+  });
+  ctx.restore();
+}
+
 // Shrinks a font size until the text fits the allowed width, measuring with
 // the context's current font family. Returns the size that fits.
 function fitFontSize(ctx, text, family, startSize, maxWidth) {
@@ -186,6 +278,18 @@ function paintLettering(ctx, w, h, caption, subtitle) {
     grad.addColorStop(1, '#a044ff');
     ctx.font = `${size}px ${family}`;
     ctx.lineJoin = 'round';
+    // The 3D extrude: a staircase of dark copies stepping down and to the
+    // left behind the face of the letter, so the headline has the carved,
+    // dimensional depth of real poster lettering instead of sitting flat
+    // on the photograph. Drawn first, with no shadow, so the gradient
+    // face and its black outline land cleanly on top of it.
+    const depth = Math.max(2, size * 0.055);
+    const steps = 5;
+    ctx.fillStyle = '#150722';
+    for (let i = steps; i >= 1; i--) {
+      const t = i / steps;
+      ctx.fillText(title, w / 2 - depth * t, cursorY + depth * t);
+    }
     ctx.shadowColor = 'rgba(0,0,0,0.55)';
     ctx.shadowBlur = size * 0.16;
     ctx.shadowOffsetY = size * 0.05;
@@ -217,15 +321,19 @@ function paintLettering(ctx, w, h, caption, subtitle) {
 
 // Paints the whole cover described by `state`:
 //   { width, height, layoutId, gradeId, slots, caption, subtitle, heat,
-//     grain, vignette, selectedIndex }
+//     grain, vignette, ink, billing, selectedIndex }
 // where slots is an array parallel to the layout's panels, each entry
-// either null or { image, zoom, ox, oy }.
+// either null or { image, zoom, ox, oy }. `ink` asks for the Poster Ink
+// pixel pass over whatever grade is chosen; `billing` (default on) adds
+// the movie-poster credits block along the bottom edge.
 export function renderCover(ctx, state) {
   const w = state.width;
   const h = state.height;
   const layout = layoutById(state.layoutId);
   const grade = gradeById(state.gradeId);
   const isSnapshots = state.layoutId === 'snapshots';
+  const inkOn = state.ink === true || grade.ink === true;
+  const inkLevels = grade.inkLevels ?? 5;
 
   ctx.save();
   ctx.fillStyle = '#0d0618';
@@ -243,15 +351,11 @@ export function renderCover(ctx, state) {
       const inset = shrinkPolygon(points, 0.9);
       tracePolygon(ctx, inset, w, h);
       ctx.clip();
-      ctx.filter = grade.filter;
-      drawPanelPhoto(ctx, slot?.image ?? null, inset, w, h, slot);
-      ctx.filter = 'none';
+      paintPanelPhoto(ctx, slot, inset, w, h, grade, inkOn, inkLevels);
     } else {
       tracePolygon(ctx, points, w, h);
       ctx.clip();
-      ctx.filter = grade.filter;
-      drawPanelPhoto(ctx, slot?.image ?? null, points, w, h, slot);
-      ctx.filter = 'none';
+      paintPanelPhoto(ctx, slot, points, w, h, grade, inkOn, inkLevels);
     }
     ctx.restore();
   });
@@ -282,5 +386,6 @@ export function renderCover(ctx, state) {
   paintLettering(ctx, w, h, state.caption, state.subtitle);
   paintHeatMeter(ctx, w, h, state.heat ?? 0);
   paintBadgeRibbon(ctx, w, h, grade.accent);
+  if (state.billing !== false) paintBillingBlock(ctx, w, h);
   ctx.restore();
 }

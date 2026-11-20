@@ -24,6 +24,8 @@ const subtitleInput = document.getElementById('subtitleInput');
 const zoomRange = document.getElementById('zoomRange');
 const grainToggle = document.getElementById('grainToggle');
 const vignetteToggle = document.getElementById('vignetteToggle');
+const inkToggle = document.getElementById('inkToggle');
+const billingToggle = document.getElementById('billingToggle');
 const trayEl = document.getElementById('tray');
 const heatLabel = document.getElementById('heatLabel');
 
@@ -40,6 +42,8 @@ const state = {
   heat: 4,
   grain: true,
   vignette: true,
+  ink: false,
+  billing: true,
   slots: [],
   selectedPanel: 0,
   selectedPhoto: 0,
@@ -135,6 +139,8 @@ function redraw() {
     heat: state.heat,
     grain: state.grain,
     vignette: state.vignette,
+    ink: state.ink,
+    billing: state.billing,
     selectedIndex: document.body.classList.contains('shot-cover') ? -1 : state.selectedPanel,
   });
   syncControls();
@@ -220,6 +226,8 @@ function exportPng(sizeKey) {
     heat: state.heat,
     grain: state.grain,
     vignette: state.vignette,
+    ink: state.ink,
+    billing: state.billing,
     selectedIndex: -1,
   });
   off.toBlob((blob) => {
@@ -356,6 +364,8 @@ function wireControls() {
   });
   grainToggle.addEventListener('change', () => { state.grain = grainToggle.checked; redraw(); });
   vignetteToggle.addEventListener('change', () => { state.vignette = vignetteToggle.checked; redraw(); });
+  inkToggle.addEventListener('change', () => { state.ink = inkToggle.checked; redraw(); });
+  billingToggle.addEventListener('change', () => { state.billing = billingToggle.checked; redraw(); });
   document.getElementById('fillAllBtn').addEventListener('click', () => {
     pushUndo();
     for (let i = 0; i < state.slots.length; i++) assignPhotoToPanel(i, state.selectedPhoto);
@@ -420,6 +430,10 @@ function applyShot(shot) {
   state.caption = shot.caption;
   state.subtitle = shot.subtitle;
   state.heat = shot.heat;
+  state.ink = shot.ink === true;
+  state.billing = shot.billing !== false;
+  inkToggle.checked = state.ink;
+  billingToggle.checked = state.billing;
   const key = `${shot.width}x${shot.height}`;
   if (POST_SIZES[key]) state.sizeKey = key;
   captionInput.value = shot.caption;
@@ -436,6 +450,8 @@ async function boot() {
   subtitleInput.value = state.subtitle;
   grainToggle.checked = state.grain;
   vignetteToggle.checked = state.vignette;
+  inkToggle.checked = state.ink;
+  billingToggle.checked = state.billing;
   const shot = readShotRequest(location.search);
   try {
     await loadLocalFonts();

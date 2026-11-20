@@ -87,6 +87,33 @@ export const LAYOUTS = {
       tiltedRect(0.52, 0.74, 0.44, 0.42, -3),
     ],
   },
+  keyart: {
+    // Three tall blades leaning hard off vertical, each one overlapping
+    // the next, so the photographs themselves become the poster's graphic
+    // shapes and the lettering sits straight over the art. Panels paint in
+    // order, so the middle blade covers the left one's edge and the right
+    // blade covers the middle's: the overlap is the design.
+    label: 'Key Art Slash',
+    panels: [
+      poly([[0, 0], [0.54, 0], [0.4, 1], [0, 1]]),
+      poly([[0.42, 0], [0.8, 0], [0.66, 1], [0.32, 1]]),
+      poly([[0.72, 0], [1, 0], [1, 1], [0.6, 1]]),
+    ],
+  },
+  castgrid: {
+    // A 3-by-2 cast wall: six faces, none of them quite the same width,
+    // with the row break nudged off centre so it reads as an ensemble
+    // poster rather than a contact sheet.
+    label: 'Cast Grid',
+    panels: [
+      poly([[0, 0], [0.385, 0], [0.375, 0.52], [0, 0.52]]),
+      poly([[0.385, 0], [0.685, 0], [0.69, 0.52], [0.375, 0.52]]),
+      poly([[0.685, 0], [1, 0], [1, 0.52], [0.69, 0.52]]),
+      poly([[0, 0.52], [0.31, 0.52], [0.315, 1], [0, 1]]),
+      poly([[0.31, 0.52], [0.665, 0.52], [0.66, 1], [0.315, 1]]),
+      poly([[0.665, 0.52], [1, 0.52], [1, 1], [0.66, 1]]),
+    ],
+  },
   duo: {
     label: 'Diagonal Duo',
     panels: [
@@ -101,7 +128,7 @@ export const LAYOUTS = {
 };
 
 // Layout ids in the order the picker shows them.
-export const LAYOUT_ORDER = ['classic', 'hero3', 'mosaic', 'snapshots', 'duo', 'fullbleed'];
+export const LAYOUT_ORDER = ['classic', 'keyart', 'hero3', 'castgrid', 'mosaic', 'snapshots', 'duo', 'fullbleed'];
 
 // Returns the layout record for an id, falling back to the classic six-panel
 // arrangement when the id is unknown (for example a stale query parameter).

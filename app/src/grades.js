@@ -58,10 +58,39 @@ export const GRADES = {
     ],
     accent: '#ff5d3a',
   },
+  acid: {
+    label: 'Acid Pop',
+    filter: 'saturate(1.85) contrast(1.14) brightness(1.05) hue-rotate(-10deg)',
+    wash: [
+      [0, 'rgba(255, 46, 166, 0.22)'],
+      [0.5, 'rgba(120, 0, 200, 0.10)'],
+      [1, 'rgba(0, 200, 190, 0.26)'],
+    ],
+    accent: '#2effd8',
+  },
+  ink: {
+    // Poster Ink is more than a filter: the renderer runs every panel
+    // photograph through posterizePixels (below) so the colours flatten
+    // into a few bold levels, the way a screen-printed poster is built
+    // from a handful of inks. The filter string here is only the gentle
+    // pre-grade the pixels get before they are flattened.
+    label: 'Poster Ink',
+    filter: 'saturate(1.2) contrast(1.08) brightness(1.02)',
+    wash: [
+      [0, 'rgba(70, 20, 90, 0.20)'],
+      [0.55, 'rgba(255, 120, 60, 0.08)'],
+      [1, 'rgba(90, 10, 70, 0.26)'],
+    ],
+    accent: '#ffb347',
+    ink: true,
+    inkLevels: 4,
+    inkSaturation: 1.35,
+    inkContrast: 1.12,
+  },
 };
 
 // Grade ids in the order the swatch row shows them.
-export const GRADE_ORDER = ['sunset', 'neon', 'golden', 'midnight', 'heatwave'];
+export const GRADE_ORDER = ['sunset', 'neon', 'golden', 'midnight', 'heatwave', 'acid', 'ink'];
 
 // Returns the grade record for an id, defaulting to Sunset Vice.
 export function gradeById(id) {
@@ -92,6 +121,39 @@ export function seededRandom(seed) {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+// The Poster Ink pixel pass. Each channel is pushed through a contrast
+// curve and a saturation stretch, then snapped to the nearest of a few
+// flat levels, so a photograph stops looking photographed and starts
+// looking printed: skies become one bold slab of colour, shadows merge,
+// and edges between tones go crisp. It runs on ImageData the caller has
+// already sized to a panel, never on the full-resolution original, which
+// keeps it fast enough to re-run on every editor redraw.
+export function posterizePixels(imageData, levels = 5, saturation = 1.3, contrast = 1.1) {
+  const data = imageData.data;
+  const steps = Math.max(1, Math.round(levels) - 1);
+  for (let i = 0; i < data.length; i += 4) {
+    let r = data[i] / 255;
+    let g = data[i + 1] / 255;
+    let b = data[i + 2] / 255;
+    // Contrast around mid-grey first, so the levels that survive the
+    // posterize are the ones that carry the picture.
+    r = (r - 0.5) * contrast + 0.5;
+    g = (g - 0.5) * contrast + 0.5;
+    b = (b - 0.5) * contrast + 0.5;
+    // Saturation: push each channel away from the pixel's own luminance.
+    const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    r = luma + (r - luma) * saturation;
+    g = luma + (g - luma) * saturation;
+    b = luma + (b - luma) * saturation;
+    // Snap to the level grid, clamping the overshoot the two stretches
+    // above can produce.
+    data[i] = Math.round(Math.min(1, Math.max(0, Math.round(r * steps) / steps)) * 255);
+    data[i + 1] = Math.round(Math.min(1, Math.max(0, Math.round(g * steps) / steps)) * 255);
+    data[i + 2] = Math.round(Math.min(1, Math.max(0, Math.round(b * steps) / steps)) * 255);
+  }
+  return imageData;
 }
 
 // Sprinkles film grain over the cover: thousands of one-pixel specks, half

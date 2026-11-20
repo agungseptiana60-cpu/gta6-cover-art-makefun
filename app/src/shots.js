@@ -3,7 +3,8 @@
 //   ?shot=cover  renders only the finished poster, full-frame
 //   ?shot=editor shows the normal editor with a composed cover in it
 // Both modes accept layout, grade, caption, subtitle, heat and size
-// parameters so each screenshot can show a different poster. This module
+// parameters so each screenshot can show a different poster, plus ink=1
+// for the Poster Ink pass and billing=0 to hide the credits block. This module
 // only parses and describes those scenes; main.js does the loading and
 // painting, then flags window.__shotReady once a frame is on screen.
 
@@ -48,6 +49,8 @@ export function readShotRequest(search) {
     caption: params.get('caption') ?? 'NEON HARBOR',
     subtitle: params.get('subtitle') ?? '',
     heat: Number.isNaN(heatRaw) ? 4 : Math.max(0, Math.min(5, heatRaw)),
+    ink: params.get('ink') === '1',
+    billing: params.get('billing') !== '0',
     width: size.w,
     height: size.h,
   };
